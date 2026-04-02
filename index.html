@@ -99,23 +99,23 @@
     box-shadow: 0 1px 6px rgba(0,0,0,.08);
   }
   .revenue-section h2 {
-    font-size: 1rem; font-weight: 700; margin-bottom: 18px; color: #1b2a4a;
+    font-size: 20px; font-weight: 700; margin-bottom: 18px; color: #1b2a4a;
   }
   .mrr-summary {
     display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 22px;
     padding-bottom: 18px; border-bottom: 1px solid #edf2f7;
   }
-  .mrr-item { font-size: .82rem; color: #636e72; }
-  .mrr-item strong { color: #1b2a4a; font-weight: 700; font-size: .95rem; }
+  .mrr-item { font-size: 14px; color: #636e72; }
+  .mrr-item strong { color: #1b2a4a; font-weight: 600; font-size: 16px; }
 
-  .bar-chart { display: flex; flex-direction: column; gap: 6px; }
+  .bar-chart { display: flex; flex-direction: column; gap: 10px; }
   .bar-row { display: flex; align-items: center; gap: 10px; }
   .bar-label {
-    width: 72px; flex-shrink: 0; text-align: right;
-    font-size: .72rem; font-weight: 600; color: #636e72;
+    width: 80px; flex-shrink: 0; text-align: right;
+    font-size: 14px; font-weight: 500; color: #636e72;
   }
   .bar-track {
-    flex: 1; background: #edf2f7; border-radius: 4px; height: 26px;
+    flex: 1; background: #edf2f7; border-radius: 4px; height: 30px;
     overflow: hidden; position: relative;
   }
   .bar-fill {
@@ -124,10 +124,10 @@
     padding-left: 10px; min-width: 48px; transition: width .4s ease;
   }
   .bar-amount {
-    font-size: .7rem; font-weight: 700; color: #fff; white-space: nowrap;
+    font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap;
   }
   .bar-amount-outside {
-    font-size: .7rem; font-weight: 700; color: #636e72; white-space: nowrap;
+    font-size: 14px; font-weight: 700; color: #636e72; white-space: nowrap;
     margin-left: 8px;
   }
   .bar-fill.bar-zero {
@@ -196,7 +196,6 @@
   </div>
 
   <div id="revenue-container"></div>
-  <div id="debug-container" style="margin-top:24px"></div>
 </div>
 
 <script>
@@ -243,49 +242,39 @@ function statusBadge(status) {
   return '<span class="badge badge-active">Active</span>';
 }
 
-/* ── Next Payment date extraction (exhaustive) ── */
+/* ── Next Payment date extraction ── */
 function getNextPaymentDate(sub) {
-  // WooCommerce Subscriptions REST API returns dates in various locations
-  // depending on plugin version. Check each one in order.
-  const candidates = [
-    sub.schedule_next_payment,           // Most common in WC Subscriptions 3.x+
-    sub.next_payment_date,               // Some versions
-    sub.next_payment,                    // Some versions
-    sub.schedule?.next_payment,          // Nested schedule object
-    sub.dates?.next_payment,             // Dates object variant
-    sub.payment_dates?.next_payment,     // Payment dates variant
-  ];
+  // The correct field from WooCommerce Subscriptions REST API
+  const val = sub.next_payment_date_gmt;
 
-  // Also check meta_data array for all known keys
-  if (Array.isArray(sub.meta_data)) {
-    const metaKeys = [
-      '_schedule_next_payment',
-      'schedule_next_payment',
-      '_next_payment_date'
-    ];
-    for (const key of metaKeys) {
-      const meta = sub.meta_data.find(m => m.key === key);
-      if (meta?.value) candidates.push(meta.value);
-    }
-  }
+  if (!val || val === '' || val === '0000-00-00 00:00:00') return null;
 
-  for (const val of candidates) {
-    if (!val) continue;
-    if (val === '0000-00-00 00:00:00') continue;
-    if (val === '') continue;
-    const d = new Date(val);
-    if (!isNaN(d.getTime()) && d.getFullYear() >= 2000) return d;
-  }
-  return null;
+  const d = new Date(val + 'Z'); // Append Z to treat as UTC
+  if (isNaN(d.getTime())) return null;
+
+  return d;
+}
+
+function parseGmtDate(val) {
+  if (!val || val === '' || val === '0000-00-00 00:00:00') return null;
+  const d = new Date(val + 'Z');
+  if (isNaN(d.getTime())) return null;
+  return d;
 }
 
 function nextPaymentHtml(sub) {
-  if (sub.status === 'pending-cancel') return '<span class="next-cancelled">Cancelled</span>';
+  if (sub.status === 'pending-cancel') {
+    let html = '<span class="next-cancelled">Cancelled</span>';
+    const endDate = parseGmtDate(sub.end_date_gmt);
+    if (endDate) {
+      html += `<br><span style="font-size:.68rem;color:#a0aec0">Access until: ${endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>`;
+    }
+    return html;
+  }
   const nextDate = getNextPaymentDate(sub);
   if (nextDate) {
     return nextDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   }
-  console.warn('Could not find next payment date for sub ID:', sub.id, sub);
   return '<span class="next-check">Check manually</span>';
 }
 
@@ -406,20 +395,13 @@ function renderTable(subs) {
 
 /* ── Revenue Chart (renewal-based projection) ── */
 
-function parseDate(raw) {
-  if (!raw || raw === '0000-00-00 00:00:00') return null;
-  const dt = new Date(raw);
-  if (isNaN(dt.getTime()) || dt.getFullYear() < 2000) return null;
-  return dt;
-}
-
 function estimateNextRenewal(sub) {
-  // Try all known date field variants via shared extractor
+  // Use the correct GMT field
   const npd = getNextPaymentDate(sub);
   if (npd) return npd;
 
   // Fallback: calculate from start_date + billing_period
-  const start = parseDate(sub.start_date) || parseDate(sub.date_created);
+  const start = parseGmtDate(sub.start_date_gmt) || parseGmtDate(sub.date_created_gmt);
   if (!start) return null;
 
   const period = (sub.billing_period || '').toLowerCase();
@@ -469,19 +451,12 @@ function renderRevenue(subs) {
 
     const nextRenewal = estimateNextRenewal(s);
 
-    if (!nextRenewal) {
-      console.warn(`Subscription #${s.id}: could not determine next renewal date, skipping from revenue projection`);
-      continue;
-    }
+    if (!nextRenewal) continue;
 
-    // Check if next_payment_date is in the past (data anomaly)
+    // Skip if next payment date is significantly in the past (data anomaly)
     if (nextRenewal < now) {
-      // Only warn if it's significantly in the past (more than 1 day)
       const diffMs = now - nextRenewal;
-      if (diffMs > 86400000) {
-        console.warn(`Subscription #${s.id}: next_payment_date is in the past (${nextRenewal.toISOString()}), skipping from revenue projection`);
-        continue;
-      }
+      if (diffMs > 86400000) continue;
     }
 
     if (period === 'month') {
@@ -591,15 +566,6 @@ async function loadData() {
     defaultSort(subs);
     currentSubs = subs;
 
-    // Debug: log raw subscription data to verify correct endpoint
-    console.log("Sample subscription data:", subs.slice(0, 3));
-    if (subs.length > 0) {
-      console.log("First subscription object keys:", Object.keys(subs[0]));
-      console.log("parent_id value:", subs[0].parent_id);
-      console.log("schedule_next_payment:", subs[0].schedule_next_payment);
-      console.log("billing_period:", subs[0].billing_period);
-    }
-
     // Summary counts
     const pendingCount = subs.filter(s => s.status === 'pending-cancel').length;
     const stripeCount = subs.filter(s => normalizePayment(s.payment_method, s.payment_method_title).type === 'stripe').length;
@@ -620,19 +586,6 @@ async function loadData() {
 
     renderTable(subs);
     renderRevenue(subs);
-
-    // Debug panel: show raw API data for first subscription
-    if (subs.length > 0) {
-      const raw = JSON.stringify(subs[0], null, 2)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      document.getElementById('debug-container').innerHTML = `
-        <details style="background:#fff;border-radius:10px;padding:16px 24px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-top:4px">
-          <summary style="cursor:pointer;font-size:.85rem;font-weight:600;color:#636e72">
-            \uD83D\uDD0D Debug: Raw API data for first subscription (ID #${subs[0].id})
-          </summary>
-          <pre style="margin-top:12px;font-size:.72rem;color:#2d3436;overflow:auto;max-height:500px;background:#f4f6f9;padding:16px;border-radius:6px">${raw}</pre>
-        </details>`;
-    }
   } catch (err) {
     document.getElementById('content').innerHTML = `
       <div class="error-box">

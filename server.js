@@ -34,7 +34,6 @@ function httpsGet(url, maxRedirects = 5) {
             return;
           }
           const redirectUrl = new URL(res.headers.location, reqUrl).href;
-          console.log(`  ↳ Redirect ${res.statusCode} → ${redirectUrl}`);
           res.resume(); // drain the response
           doRequest(redirectUrl, redirectsLeft - 1);
           return;
@@ -72,12 +71,6 @@ async function fetchAllSubscriptions(status) {
     }
 
     const items = res.body;
-    // Debug: log first fetch to confirm correct endpoint response
-    if (page === 1 && items && Array.isArray(items) && items.length > 0) {
-      const first = items[0];
-      console.log(`[${status}] First object keys:`, Object.keys(first).join(', '));
-      console.log(`[${status}] parent_id=${first.parent_id}, schedule_next_payment=${first.schedule_next_payment}, billing_period=${first.billing_period}, status=${first.status}`);
-    }
     if (!Array.isArray(items)) {
       return { error: 'unexpected_response', message: 'Expected array from API', detail: items };
     }

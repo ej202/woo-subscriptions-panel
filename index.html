@@ -35,12 +35,21 @@
   .summary-card {
     background: #fff; border-radius: 10px; padding: 18px 24px; min-width: 135px;
     box-shadow: 0 1px 4px rgba(0,0,0,.07); border-left: 4px solid transparent;
-    flex: 1;
+    flex: 1; transition: all .15s;
+  }
+  .summary-card.filterable { cursor: pointer; }
+  .summary-card.filterable:hover { box-shadow: 0 2px 8px rgba(0,0,0,.13); transform: translateY(-1px); }
+  .summary-card.filter-active {
+    background: #eef0f8; border-left-width: 5px;
+    box-shadow: 0 2px 8px rgba(108,92,231,.18), inset 0 0 0 1px rgba(108,92,231,.2);
   }
   .summary-card .label {
     font-size: .65rem; color: #8395a7; text-transform: uppercase;
     letter-spacing: .8px; font-weight: 600; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 6px;
   }
+  .summary-card .label .check { display: none; font-size: .7rem; color: #6c5ce7; }
+  .summary-card.filter-active .label .check { display: inline; }
   .summary-card .value { font-size: 1.75rem; font-weight: 800; line-height: 1; }
   .summary-card .value.orange { color: #e17055; }
   .summary-card .value.green  { color: #00b894; }
@@ -53,6 +62,16 @@
   .card-paypal   { border-left-color: #74b9ff; }
   .card-annual   { border-left-color: #a29bfe; }
   .card-monthly  { border-left-color: #81ecec; }
+
+  /* ── Filter Bar ── */
+  .filter-info {
+    font-size: .8rem; color: #636e72; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .filter-info a {
+    color: #6c5ce7; cursor: pointer; text-decoration: none; font-weight: 600;
+  }
+  .filter-info a:hover { text-decoration: underline; }
 
   /* ── Table Card ── */
   .table-card {
@@ -171,26 +190,27 @@
 
 <div class="main">
   <div class="summary-bar" id="summary">
-    <div class="summary-card">
+    <div class="summary-card" id="card-total">
       <div class="label">Total</div><div class="value" id="s-total">--</div>
     </div>
-    <div class="summary-card card-pending">
-      <div class="label">Pending Cancel</div><div class="value orange" id="s-pending">--</div>
+    <div class="summary-card card-pending filterable" id="card-pending" onclick="toggleFilter('pending')">
+      <div class="label">Pending Cancel <span class="check">&check;</span></div><div class="value orange" id="s-pending">--</div>
     </div>
-    <div class="summary-card card-stripe">
-      <div class="label">Stripe</div><div class="value green" id="s-stripe">--</div>
+    <div class="summary-card card-stripe filterable" id="card-stripe" onclick="toggleFilter('stripe')">
+      <div class="label">Stripe <span class="check">&check;</span></div><div class="value green" id="s-stripe">--</div>
     </div>
-    <div class="summary-card card-paypal">
-      <div class="label">PayPal</div><div class="value blue" id="s-paypal">--</div>
+    <div class="summary-card card-paypal filterable" id="card-paypal" onclick="toggleFilter('paypal')">
+      <div class="label">PayPal <span class="check">&check;</span></div><div class="value blue" id="s-paypal">--</div>
     </div>
-    <div class="summary-card card-annual">
-      <div class="label">Annual</div><div class="value purple" id="s-annual">--</div>
+    <div class="summary-card card-annual filterable" id="card-annual" onclick="toggleFilter('annual')">
+      <div class="label">Annual <span class="check">&check;</span></div><div class="value purple" id="s-annual">--</div>
     </div>
-    <div class="summary-card card-monthly">
-      <div class="label">Monthly</div><div class="value teal" id="s-monthly">--</div>
+    <div class="summary-card card-monthly filterable" id="card-monthly" onclick="toggleFilter('monthly')">
+      <div class="label">Monthly <span class="check">&check;</span></div><div class="value teal" id="s-monthly">--</div>
     </div>
   </div>
 
+  <div id="filter-bar"></div>
   <div id="content">
     <div class="loading">Loading subscriptions...</div>
   </div>
@@ -201,7 +221,15 @@
 <script>
 let cachedRates = null;
 let currentSubs = [];
-let paymentSortState = 0; // 0=default, 1=paypal first, 2=stripe first
+
+/* ── Sort State ── */
+// column: null | 'status' | 'payment' | 'nextpay'
+// dir: 0=default, 1=first click, 2=second click
+let sortCol = null;
+let sortDir = 0;
+
+/* ── Filter State ── */
+const activeFilters = new Set();
 
 /* ── Currency ── */
 function convertToUSD(amount, currency, rates) {
@@ -244,14 +272,10 @@ function statusBadge(status) {
 
 /* ── Next Payment date extraction ── */
 function getNextPaymentDate(sub) {
-  // The correct field from WooCommerce Subscriptions REST API
   const val = sub.next_payment_date_gmt;
-
   if (!val || val === '' || val === '0000-00-00 00:00:00') return null;
-
-  const d = new Date(val + 'Z'); // Append Z to treat as UTC
+  const d = new Date(val + 'Z');
   if (isNaN(d.getTime())) return null;
-
   return d;
 }
 
@@ -278,37 +302,119 @@ function nextPaymentHtml(sub) {
   return '<span class="next-check">Check manually</span>';
 }
 
+/* ── Filtering ── */
+function toggleFilter(name) {
+  if (activeFilters.has(name)) {
+    activeFilters.delete(name);
+  } else {
+    activeFilters.add(name);
+  }
+  updateFilterCardStyles();
+  applyFiltersAndSort();
+}
+
+function clearFilters() {
+  activeFilters.clear();
+  updateFilterCardStyles();
+  applyFiltersAndSort();
+}
+
+function updateFilterCardStyles() {
+  const ids = ['pending', 'stripe', 'paypal', 'annual', 'monthly'];
+  for (const id of ids) {
+    const el = document.getElementById('card-' + id);
+    if (activeFilters.has(id)) {
+      el.classList.add('filter-active');
+    } else {
+      el.classList.remove('filter-active');
+    }
+  }
+}
+
+function matchesFilters(sub) {
+  if (activeFilters.size === 0) return true;
+  for (const f of activeFilters) {
+    if (f === 'pending' && sub.status !== 'pending-cancel') return false;
+    if (f === 'stripe' && normalizePayment(sub.payment_method, sub.payment_method_title).type !== 'stripe') return false;
+    if (f === 'paypal' && normalizePayment(sub.payment_method, sub.payment_method_title).type !== 'paypal') return false;
+    if (f === 'annual' && (sub.billing_period || '').toLowerCase() !== 'year') return false;
+    if (f === 'monthly' && (sub.billing_period || '').toLowerCase() !== 'month') return false;
+  }
+  return true;
+}
+
 /* ── Sorting ── */
-function defaultSort(subs) {
-  subs.sort((a, b) => {
-    if (a.status === 'pending-cancel' && b.status !== 'pending-cancel') return -1;
-    if (b.status === 'pending-cancel' && a.status !== 'pending-cancel') return 1;
-    return 0;
-  });
+function sortArrow(col) {
+  if (sortCol !== col || sortDir === 0) return ' \u21C5';
+  return sortDir === 1 ? ' \u2191' : ' \u2193';
 }
 
-function sortByPayment(subs, state) {
-  if (state === 0) { defaultSort(subs); return; }
-  const firstType = state === 1 ? 'paypal' : 'stripe';
-  subs.sort((a, b) => {
-    const pa = normalizePayment(a.payment_method, a.payment_method_title).type;
-    const pb = normalizePayment(b.payment_method, b.payment_method_title).type;
-    if (pa === firstType && pb !== firstType) return -1;
-    if (pb === firstType && pa !== firstType) return 1;
-    return 0;
-  });
+function cycleSort(col) {
+  if (sortCol === col) {
+    sortDir = (sortDir + 1) % 3;
+    if (sortDir === 0) sortCol = null;
+  } else {
+    sortCol = col;
+    sortDir = 1;
+  }
+  applyFiltersAndSort();
 }
 
-function cyclePaymentSort() {
-  paymentSortState = (paymentSortState + 1) % 3;
-  sortByPayment(currentSubs, paymentSortState);
-  renderTable(currentSubs);
+function applySortToArray(arr) {
+  if (!sortCol || sortDir === 0) {
+    // Default: pending-cancel first
+    arr.sort((a, b) => {
+      if (a.status === 'pending-cancel' && b.status !== 'pending-cancel') return -1;
+      if (b.status === 'pending-cancel' && a.status !== 'pending-cancel') return 1;
+      return 0;
+    });
+    return;
+  }
+
+  if (sortCol === 'status') {
+    arr.sort((a, b) => {
+      const aPC = a.status === 'pending-cancel' ? 1 : 0;
+      const bPC = b.status === 'pending-cancel' ? 1 : 0;
+      // dir 1 = active first (aPC ascending), dir 2 = pending-cancel first (aPC descending)
+      return sortDir === 1 ? aPC - bPC : bPC - aPC;
+    });
+  } else if (sortCol === 'payment') {
+    const order = sortDir === 1
+      ? { paypal: 0, stripe: 1, other: 2 }
+      : { stripe: 0, paypal: 1, other: 2 };
+    arr.sort((a, b) => {
+      const pa = normalizePayment(a.payment_method, a.payment_method_title).type;
+      const pb = normalizePayment(b.payment_method, b.payment_method_title).type;
+      return (order[pa] ?? 3) - (order[pb] ?? 3);
+    });
+  } else if (sortCol === 'nextpay') {
+    arr.sort((a, b) => {
+      const da = getNextPaymentDate(a);
+      const db = getNextPaymentDate(b);
+      // Nulls go to the bottom
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return sortDir === 1 ? da - db : db - da;
+    });
+  }
 }
 
-function sortArrowText() {
-  if (paymentSortState === 1) return ' \u25B2';
-  if (paymentSortState === 2) return ' \u25BC';
-  return ' \u21C5';
+function applyFiltersAndSort() {
+  const filtered = currentSubs.filter(matchesFilters);
+  applySortToArray(filtered);
+  renderTable(filtered);
+  renderFilterBar(filtered.length, currentSubs.length);
+}
+
+/* ── Filter info bar ── */
+function renderFilterBar(shown, total) {
+  const el = document.getElementById('filter-bar');
+  if (activeFilters.size === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = `<div class="filter-info">Showing ${shown} of ${total} subscriptions <a onclick="clearFilters()">Clear filters</a></div>`;
 }
 
 /* ── Error display ── */
@@ -381,9 +487,9 @@ function renderTable(subs) {
           <thead><tr>
             <th>ID</th>
             <th>Customer</th>
-            <th>Status</th>
-            <th class="sortable" onclick="cyclePaymentSort()">Payment<span class="sort-arrow">${sortArrowText()}</span></th>
-            <th>Next Payment</th>
+            <th class="sortable" onclick="cycleSort('status')">Status<span class="sort-arrow">${sortArrow('status')}</span></th>
+            <th class="sortable" onclick="cycleSort('payment')">Payment<span class="sort-arrow">${sortArrow('payment')}</span></th>
+            <th class="sortable" onclick="cycleSort('nextpay')">Next Payment<span class="sort-arrow">${sortArrow('nextpay')}</span></th>
             <th>Total</th>
             <th>Start Date</th>
           </tr></thead>
@@ -396,11 +502,9 @@ function renderTable(subs) {
 /* ── Revenue Chart (renewal-based projection) ── */
 
 function estimateNextRenewal(sub) {
-  // Use the correct GMT field
   const npd = getNextPaymentDate(sub);
   if (npd) return npd;
 
-  // Fallback: calculate from start_date + billing_period
   const start = parseGmtDate(sub.start_date_gmt) || parseGmtDate(sub.date_created_gmt);
   if (!start) return null;
 
@@ -423,6 +527,7 @@ function getMonthKey(dt) {
 }
 
 function renderRevenue(subs) {
+  // Revenue always uses ALL active subs, unaffected by filters
   const activeSubs = subs.filter(s => s.status !== 'pending-cancel');
   if (activeSubs.length === 0) {
     document.getElementById('revenue-container').innerHTML = '';
@@ -431,9 +536,8 @@ function renderRevenue(subs) {
 
   const now = new Date();
   const windowStart = getMonthKey(now);
-  const windowEnd = windowStart + 11; // 12 months inclusive
+  const windowEnd = windowStart + 11;
 
-  // Build month buckets
   const monthBuckets = {};
   for (let i = 0; i < 12; i++) {
     monthBuckets[windowStart + i] = 0;
@@ -441,7 +545,7 @@ function renderRevenue(subs) {
 
   let activeMonthlyCount = 0;
   let activeAnnualCount = 0;
-  let monthlyPerMonth = 0; // total $ from monthly subs per occurrence
+  let monthlyPerMonth = 0;
 
   for (const s of activeSubs) {
     const currency = s.currency || 'USD';
@@ -453,7 +557,6 @@ function renderRevenue(subs) {
 
     if (!nextRenewal) continue;
 
-    // Skip if next payment date is significantly in the past (data anomaly)
     if (nextRenewal < now) {
       const diffMs = now - nextRenewal;
       if (diffMs > 86400000) continue;
@@ -463,9 +566,8 @@ function renderRevenue(subs) {
       activeMonthlyCount++;
       monthlyPerMonth += usd;
 
-      // Place renewals in each month starting from next renewal
       const renewalDate = new Date(nextRenewal);
-      for (let m = 0; m < 24; m++) { // iterate enough to cover the window
+      for (let m = 0; m < 24; m++) {
         const key = getMonthKey(renewalDate);
         if (key > windowEnd) break;
         if (key >= windowStart && monthBuckets[key] !== undefined) {
@@ -476,12 +578,10 @@ function renderRevenue(subs) {
     } else if (period === 'year') {
       activeAnnualCount++;
 
-      // Annual renewal: single lump payment in the renewal month
       const key = getMonthKey(nextRenewal);
       if (key >= windowStart && key <= windowEnd && monthBuckets[key] !== undefined) {
         monthBuckets[key] += usd;
       }
-      // Also check if a second annual renewal could land within 12 months
       const secondRenewal = new Date(nextRenewal);
       secondRenewal.setFullYear(secondRenewal.getFullYear() + 1);
       const key2 = getMonthKey(secondRenewal);
@@ -491,7 +591,6 @@ function renderRevenue(subs) {
     }
   }
 
-  // Build ordered month data
   const months = [];
   for (let i = 0; i < 12; i++) {
     const key = windowStart + i;
@@ -551,7 +650,11 @@ async function loadData() {
   btn.textContent = 'Loading...';
   document.getElementById('content').innerHTML = '<div class="loading">Loading subscriptions...</div>';
   document.getElementById('revenue-container').innerHTML = '';
-  paymentSortState = 0;
+  document.getElementById('filter-bar').innerHTML = '';
+  sortCol = null;
+  sortDir = 0;
+  activeFilters.clear();
+  updateFilterCardStyles();
 
   try {
     const res = await fetch('/api/subscriptions');
@@ -563,10 +666,9 @@ async function loadData() {
     const rates = data.rates || cachedRates;
     if (rates) cachedRates = rates;
 
-    defaultSort(subs);
     currentSubs = subs;
 
-    // Summary counts
+    // Summary counts (always from full dataset)
     const pendingCount = subs.filter(s => s.status === 'pending-cancel').length;
     const stripeCount = subs.filter(s => normalizePayment(s.payment_method, s.payment_method_title).type === 'stripe').length;
     const paypalCount = subs.filter(s => normalizePayment(s.payment_method, s.payment_method_title).type === 'paypal').length;
@@ -584,7 +686,7 @@ async function loadData() {
     const ts = new Date().toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, month: 'short', day: 'numeric' });
     document.getElementById('last-updated').textContent = 'Last updated: ' + ts;
 
-    renderTable(subs);
+    applyFiltersAndSort();
     renderRevenue(subs);
   } catch (err) {
     document.getElementById('content').innerHTML = `

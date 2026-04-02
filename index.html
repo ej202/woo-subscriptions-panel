@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subscriptions Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f4f6f9; color: #2d3436; min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #1b2a4a; color: #fff; padding: 0 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px; box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  }
+  .header h1 { font-size: 1.2rem; font-weight: 700; letter-spacing: .3px; }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .last-updated { font-size: .72rem; color: #a0aec0; white-space: nowrap; }
+  .btn {
+    background: #6c5ce7; color: #fff; border: none; padding: 8px 20px;
+    border-radius: 6px; cursor: pointer; font-size: .82rem; font-weight: 600;
+    transition: background .15s;
+  }
+  .btn:hover { background: #5a4bd1; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .main { padding: 24px 32px 48px; max-width: 1400px; margin: 0 auto; }
+
+  /* ── Summary Cards ── */
+  .summary-bar { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 24px; }
+  .summary-card {
+    background: #fff; border-radius: 10px; padding: 18px 24px; min-width: 135px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.07); border-left: 4px solid transparent;
+    flex: 1;
+  }
+  .summary-card .label {
+    font-size: .65rem; color: #8395a7; text-transform: uppercase;
+    letter-spacing: .8px; font-weight: 600; margin-bottom: 6px;
+  }
+  .summary-card .value { font-size: 1.75rem; font-weight: 800; line-height: 1; }
+  .summary-card .value.orange { color: #e17055; }
+  .summary-card .value.green  { color: #00b894; }
+  .summary-card .value.blue   { color: #0984e3; }
+  .summary-card .value.purple { color: #6c5ce7; }
+  .summary-card .value.teal   { color: #00cec9; }
+
+  .card-pending  { border-left-color: #fab1a0; }
+  .card-stripe   { border-left-color: #55efc4; }
+  .card-paypal   { border-left-color: #74b9ff; }
+  .card-annual   { border-left-color: #a29bfe; }
+  .card-monthly  { border-left-color: #81ecec; }
+
+  /* ── Table Card ── */
+  .table-card {
+    background: #fff; border-radius: 10px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.08); overflow: hidden; margin-bottom: 28px;
+  }
+  .table-wrap { overflow-x: auto; max-height: 70vh; }
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  thead { position: sticky; top: 0; z-index: 2; }
+  th {
+    background: #1b2a4a; color: #cbd5e0; text-align: left;
+    padding: 11px 14px; font-weight: 700; white-space: nowrap;
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .7px;
+  }
+  td { padding: 11px 14px; border-bottom: 1px solid #edf2f7; vertical-align: top; }
+  tbody tr:nth-child(even) td { background: #f8fafc; }
+  tbody tr:hover td { background: #edf2f7; }
+
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #fff; }
+  .sort-arrow { margin-left: 4px; font-size: .7rem; opacity: .6; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-block; padding: 3px 12px; border-radius: 999px;
+    font-size: .7rem; font-weight: 700; color: #fff; white-space: nowrap;
+    letter-spacing: .3px;
+  }
+  .badge-active         { background: #00b894; }
+  .badge-pending-cancel { background: #e17055; }
+  .badge-stripe         { background: #00b894; }
+  .badge-paypal         { background: #0984e3; }
+  .badge-other          { background: #a0aec0; }
+
+  .next-cancelled { color: #a0aec0; font-style: italic; }
+  .next-check     { color: #d4a017; font-weight: 600; }
+
+  .original-currency { font-size: .68rem; color: #a0aec0; display: block; margin-top: 2px; }
+  .customer-email { font-size: .72rem; color: #a0aec0; }
+
+  /* ── Revenue Section ── */
+  .revenue-section {
+    background: #fff; border-radius: 10px; padding: 28px 32px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.08);
+  }
+  .revenue-section h2 {
+    font-size: 1rem; font-weight: 700; margin-bottom: 18px; color: #1b2a4a;
+  }
+  .mrr-summary {
+    display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 22px;
+    padding-bottom: 18px; border-bottom: 1px solid #edf2f7;
+  }
+  .mrr-item { font-size: .82rem; color: #636e72; }
+  .mrr-item strong { color: #1b2a4a; font-weight: 700; font-size: .95rem; }
+
+  .bar-chart { display: flex; flex-direction: column; gap: 6px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; }
+  .bar-label {
+    width: 72px; flex-shrink: 0; text-align: right;
+    font-size: .72rem; font-weight: 600; color: #636e72;
+  }
+  .bar-track {
+    flex: 1; background: #edf2f7; border-radius: 4px; height: 26px;
+    overflow: hidden; position: relative;
+  }
+  .bar-fill {
+    height: 100%; background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+    border-radius: 4px; display: flex; align-items: center;
+    padding-left: 10px; min-width: 48px; transition: width .4s ease;
+  }
+  .bar-amount {
+    font-size: .7rem; font-weight: 700; color: #fff; white-space: nowrap;
+  }
+  .bar-amount-outside {
+    font-size: .7rem; font-weight: 700; color: #636e72; white-space: nowrap;
+    margin-left: 8px;
+  }
+  .bar-fill.bar-zero {
+    background: #dfe6e9; min-width: 0; width: 0 !important;
+  }
+  .bar-zero-note {
+    position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+    font-size: .68rem; color: #a0aec0; font-style: italic;
+  }
+
+  .revenue-callouts {
+    display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 18px;
+  }
+  .callout {
+    font-size: .78rem; color: #636e72; padding: 8px 16px;
+    background: #f4f6f9; border-radius: 6px; border-left: 3px solid #a29bfe;
+  }
+  .callout strong { color: #1b2a4a; }
+  .callout.high { border-left-color: #00b894; }
+  .callout.low { border-left-color: #e17055; }
+
+  /* ── Error / Loading ── */
+  .error-box {
+    background: #fff8e1; border-left: 4px solid #fdcb6e; padding: 20px 24px;
+    border-radius: 8px; margin-bottom: 20px;
+  }
+  .error-box h3 { margin-bottom: 8px; color: #d35400; }
+  .error-box ul { margin-left: 20px; margin-top: 8px; }
+  .loading { text-align: center; padding: 48px; color: #a0aec0; font-size: .95rem; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Subscriptions Dashboard</h1>
+  <div class="header-right">
+    <span class="last-updated" id="last-updated"></span>
+    <button class="btn" id="refresh-btn" onclick="loadData()">Refresh</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="summary-bar" id="summary">
+    <div class="summary-card">
+      <div class="label">Total</div><div class="value" id="s-total">--</div>
+    </div>
+    <div class="summary-card card-pending">
+      <div class="label">Pending Cancel</div><div class="value orange" id="s-pending">--</div>
+    </div>
+    <div class="summary-card card-stripe">
+      <div class="label">Stripe</div><div class="value green" id="s-stripe">--</div>
+    </div>
+    <div class="summary-card card-paypal">
+      <div class="label">PayPal</div><div class="value blue" id="s-paypal">--</div>
+    </div>
+    <div class="summary-card card-annual">
+      <div class="label">Annual</div><div class="value purple" id="s-annual">--</div>
+    </div>
+    <div class="summary-card card-monthly">
+      <div class="label">Monthly</div><div class="value teal" id="s-monthly">--</div>
+    </div>
+  </div>
+
+  <div id="content">
+    <div class="loading">Loading subscriptions...</div>
+  </div>
+
+  <div id="revenue-container"></div>
+</div>
+
+<script>
+let cachedRates = null;
+let currentSubs = [];
+let paymentSortState = 0; // 0=default, 1=paypal first, 2=stripe first
+
+/* ── Currency ── */
+function convertToUSD(amount, currency, rates) {
+  if (!currency || currency === 'USD') return { usd: parseFloat(amount), original: null };
+  if (!rates || !rates[currency]) return { usd: null, original: { amount: parseFloat(amount), currency } };
+  const rate = rates[currency];
+  return { usd: parseFloat(amount) / rate, original: { amount: parseFloat(amount), currency } };
+}
+
+function fmt(n) { return '$' + n.toFixed(2); }
+
+function fmtDate(d) {
+  if (!d) return null;
+  const dt = new Date(d);
+  if (isNaN(dt.getTime()) || dt.getFullYear() < 2000) return null;
+  return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/* ── Payment normalization ── */
+function normalizePayment(method, title) {
+  const m = (method || '').toLowerCase();
+  const t = (title || '').toLowerCase();
+  if (m === 'stripe' || t.includes('stripe') || t.includes('cr\u00e9dito') || t.includes('d\u00e9bito'))
+    return { type: 'stripe', label: 'Stripe' };
+  if (m === 'paypal' || m.includes('ppcp') || t.includes('paypal'))
+    return { type: 'paypal', label: 'PayPal' };
+  return { type: 'other', label: title || method || 'Unknown' };
+}
+
+function paymentBadge(method, title) {
+  const p = normalizePayment(method, title);
+  const cls = p.type === 'stripe' ? 'badge-stripe' : p.type === 'paypal' ? 'badge-paypal' : 'badge-other';
+  return `<span class="badge ${cls}">${p.label}</span>`;
+}
+
+function statusBadge(status) {
+  if (status === 'pending-cancel') return '<span class="badge badge-pending-cancel">Pending Cancel</span>';
+  return '<span class="badge badge-active">Active</span>';
+}
+
+/* ── Next Payment date extraction ── */
+function isValidDateStr(raw) {
+  if (!raw || raw === '' || raw === '0000-00-00 00:00:00') return false;
+  const dt = new Date(raw);
+  return !isNaN(dt.getTime()) && dt.getFullYear() >= 2000;
+}
+
+function extractNextPaymentDate(sub) {
+  // Check all known field name variants in priority order
+  const candidates = [
+    sub.schedule_next_payment,
+    sub.next_payment_date,
+    sub.next_payment
+  ];
+  for (const raw of candidates) {
+    if (isValidDateStr(raw)) return raw;
+  }
+  // Check meta_data array for _schedule_next_payment
+  if (Array.isArray(sub.meta_data)) {
+    for (const meta of sub.meta_data) {
+      if (meta.key === '_schedule_next_payment' && isValidDateStr(meta.value)) {
+        return meta.value;
+      }
+    }
+  }
+  return null;
+}
+
+function nextPaymentHtml(sub) {
+  if (sub.status === 'pending-cancel') return '<span class="next-cancelled">Cancelled</span>';
+  const raw = extractNextPaymentDate(sub);
+  if (!raw) return '<span class="next-check">Check manually</span>';
+  const formatted = fmtDate(raw);
+  if (!formatted) return '<span class="next-check">Check manually</span>';
+  return formatted;
+}
+
+/* ── Sorting ── */
+function defaultSort(subs) {
+  subs.sort((a, b) => {
+    if (a.status === 'pending-cancel' && b.status !== 'pending-cancel') return -1;
+    if (b.status === 'pending-cancel' && a.status !== 'pending-cancel') return 1;
+    return 0;
+  });
+}
+
+function sortByPayment(subs, state) {
+  if (state === 0) { defaultSort(subs); return; }
+  const firstType = state === 1 ? 'paypal' : 'stripe';
+  subs.sort((a, b) => {
+    const pa = normalizePayment(a.payment_method, a.payment_method_title).type;
+    const pb = normalizePayment(b.payment_method, b.payment_method_title).type;
+    if (pa === firstType && pb !== firstType) return -1;
+    if (pb === firstType && pa !== firstType) return 1;
+    return 0;
+  });
+}
+
+function cyclePaymentSort() {
+  paymentSortState = (paymentSortState + 1) % 3;
+  sortByPayment(currentSubs, paymentSortState);
+  renderTable(currentSubs);
+}
+
+function sortArrowText() {
+  if (paymentSortState === 1) return ' \u25B2';
+  if (paymentSortState === 2) return ' \u25BC';
+  return ' \u21C5';
+}
+
+/* ── Error display ── */
+function showError(data) {
+  let tips = '';
+  if (data.error === 'auth_failed') {
+    tips = `<ul>
+      <li>Verify WC_KEY and WC_SECRET in your .env file</li>
+      <li>Ensure the API keys have Read permissions</li>
+      <li>Check that the keys haven't been revoked in WooCommerce &gt; Settings &gt; Advanced &gt; REST API</li>
+    </ul>`;
+  } else if (data.error === 'endpoint_not_found') {
+    tips = `<ul>
+      <li>Ensure the <strong>WooCommerce Subscriptions</strong> plugin is installed and activated</li>
+      <li>Check that the REST API is enabled (WooCommerce &gt; Settings &gt; Advanced &gt; REST API)</li>
+      <li>Verify your WordPress permalinks are set to something other than "Plain"</li>
+    </ul>`;
+  }
+  document.getElementById('content').innerHTML = `
+    <div class="error-box">
+      <h3>Error: ${data.message || 'Unknown error'}</h3>
+      ${tips}
+      ${data.detail ? '<pre style="margin-top:8px;font-size:.78rem;overflow:auto;color:#636e72">' + JSON.stringify(data.detail, null, 2) + '</pre>' : ''}
+    </div>`;
+}
+
+/* ── Render Table ── */
+function renderTable(subs) {
+  if (subs.length === 0) {
+    document.getElementById('content').innerHTML = '<div class="loading">No subscriptions found.</div>';
+    return;
+  }
+
+  let rows = '';
+  for (const s of subs) {
+    const name = `${s.billing?.first_name || ''} ${s.billing?.last_name || ''}`.trim() || '\u2014';
+    const email = s.billing?.email || '\u2014';
+    const currency = s.currency || 'USD';
+    const conv = convertToUSD(s.total, currency, cachedRates);
+    const period = s.billing_period || '';
+
+    let amountHtml;
+    if (conv.usd !== null) {
+      amountHtml = `${fmt(conv.usd)} / ${period}`;
+      if (conv.original) {
+        amountHtml += `<span class="original-currency">${conv.original.amount.toFixed(2)} ${conv.original.currency}</span>`;
+      }
+    } else {
+      amountHtml = `${parseFloat(s.total).toFixed(2)} ${currency} / ${period}`;
+      if (currency !== 'USD') {
+        amountHtml += `<span class="original-currency">Exchange rate unavailable</span>`;
+      }
+    }
+
+    rows += `<tr>
+      <td>${s.id}</td>
+      <td>${name}<br><span class="customer-email">${email}</span></td>
+      <td>${statusBadge(s.status)}</td>
+      <td>${paymentBadge(s.payment_method, s.payment_method_title)}</td>
+      <td>${nextPaymentHtml(s)}</td>
+      <td>${amountHtml}</td>
+      <td>${fmtDate(s.start_date || s.date_created) || '\u2014'}</td>
+    </tr>`;
+  }
+
+  document.getElementById('content').innerHTML = `
+    <div class="table-card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>ID</th>
+            <th>Customer</th>
+            <th>Status</th>
+            <th class="sortable" onclick="cyclePaymentSort()">Payment<span class="sort-arrow">${sortArrowText()}</span></th>
+            <th>Next Payment</th>
+            <th>Total</th>
+            <th>Start Date</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/* ── Revenue Chart (renewal-based projection) ── */
+
+function parseDate(raw) {
+  if (!raw || raw === '0000-00-00 00:00:00') return null;
+  const dt = new Date(raw);
+  if (isNaN(dt.getTime()) || dt.getFullYear() < 2000) return null;
+  return dt;
+}
+
+function estimateNextRenewal(sub) {
+  // Try all known date field variants via shared extractor
+  const raw = extractNextPaymentDate(sub);
+  const npd = raw ? parseDate(raw) : null;
+  if (npd) return npd;
+
+  // Fallback: calculate from start_date + billing_period
+  const start = parseDate(sub.start_date) || parseDate(sub.date_created);
+  if (!start) return null;
+
+  const period = (sub.billing_period || '').toLowerCase();
+  const now = new Date();
+  const d = new Date(start);
+
+  if (period === 'month') {
+    while (d <= now) d.setMonth(d.getMonth() + 1);
+  } else if (period === 'year') {
+    while (d <= now) d.setFullYear(d.getFullYear() + 1);
+  } else {
+    return null;
+  }
+  return d;
+}
+
+function getMonthKey(dt) {
+  return dt.getFullYear() * 12 + dt.getMonth();
+}
+
+function renderRevenue(subs) {
+  const activeSubs = subs.filter(s => s.status !== 'pending-cancel');
+  if (activeSubs.length === 0) {
+    document.getElementById('revenue-container').innerHTML = '';
+    return;
+  }
+
+  const now = new Date();
+  const windowStart = getMonthKey(now);
+  const windowEnd = windowStart + 11; // 12 months inclusive
+
+  // Build month buckets
+  const monthBuckets = {};
+  for (let i = 0; i < 12; i++) {
+    monthBuckets[windowStart + i] = 0;
+  }
+
+  let activeMonthlyCount = 0;
+  let activeAnnualCount = 0;
+  let monthlyPerMonth = 0; // total $ from monthly subs per occurrence
+
+  for (const s of activeSubs) {
+    const currency = s.currency || 'USD';
+    const conv = convertToUSD(s.total, currency, cachedRates);
+    const usd = conv.usd !== null ? conv.usd : 0;
+    const period = (s.billing_period || '').toLowerCase();
+
+    const nextRenewal = estimateNextRenewal(s);
+
+    if (!nextRenewal) {
+      console.warn(`Subscription #${s.id}: could not determine next renewal date, skipping from revenue projection`);
+      continue;
+    }
+
+    // Check if next_payment_date is in the past (data anomaly)
+    if (nextRenewal < now) {
+      // Only warn if it's significantly in the past (more than 1 day)
+      const diffMs = now - nextRenewal;
+      if (diffMs > 86400000) {
+        console.warn(`Subscription #${s.id}: next_payment_date is in the past (${nextRenewal.toISOString()}), skipping from revenue projection`);
+        continue;
+      }
+    }
+
+    if (period === 'month') {
+      activeMonthlyCount++;
+      monthlyPerMonth += usd;
+
+      // Place renewals in each month starting from next renewal
+      const renewalDate = new Date(nextRenewal);
+      for (let m = 0; m < 24; m++) { // iterate enough to cover the window
+        const key = getMonthKey(renewalDate);
+        if (key > windowEnd) break;
+        if (key >= windowStart && monthBuckets[key] !== undefined) {
+          monthBuckets[key] += usd;
+        }
+        renewalDate.setMonth(renewalDate.getMonth() + 1);
+      }
+    } else if (period === 'year') {
+      activeAnnualCount++;
+
+      // Annual renewal: single lump payment in the renewal month
+      const key = getMonthKey(nextRenewal);
+      if (key >= windowStart && key <= windowEnd && monthBuckets[key] !== undefined) {
+        monthBuckets[key] += usd;
+      }
+      // Also check if a second annual renewal could land within 12 months
+      const secondRenewal = new Date(nextRenewal);
+      secondRenewal.setFullYear(secondRenewal.getFullYear() + 1);
+      const key2 = getMonthKey(secondRenewal);
+      if (key2 >= windowStart && key2 <= windowEnd && monthBuckets[key2] !== undefined) {
+        monthBuckets[key2] += usd;
+      }
+    }
+  }
+
+  // Build ordered month data
+  const months = [];
+  for (let i = 0; i < 12; i++) {
+    const key = windowStart + i;
+    const d = new Date(Math.floor(key / 12), key % 12, 1);
+    const label = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    months.push({ label, amount: monthBuckets[key] });
+  }
+
+  const maxAmount = Math.max(...months.map(m => m.amount), 1);
+  const highMonth = months.reduce((best, m) => m.amount > best.amount ? m : best, months[0]);
+  const lowMonth = months.reduce((best, m) => m.amount < best.amount ? m : best, months[0]);
+
+  let barsHtml = '';
+  for (const m of months) {
+    if (m.amount === 0) {
+      barsHtml += `
+        <div class="bar-row">
+          <div class="bar-label">${m.label}</div>
+          <div class="bar-track">
+            <span class="bar-zero-note">No renewals</span>
+          </div>
+          <span class="bar-amount-outside">$0.00</span>
+        </div>`;
+    } else {
+      const pct = Math.max((m.amount / maxAmount) * 100, 4);
+      barsHtml += `
+        <div class="bar-row">
+          <div class="bar-label">${m.label}</div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:${pct.toFixed(1)}%">
+              <span class="bar-amount">${fmt(m.amount)}</span>
+            </div>
+          </div>
+        </div>`;
+    }
+  }
+
+  document.getElementById('revenue-container').innerHTML = `
+    <div class="revenue-section">
+      <h2>Projected Monthly Revenue</h2>
+      <div class="mrr-summary">
+        <div class="mrr-item">Active monthly subscribers: <strong>${activeMonthlyCount}</strong> &mdash; contributing <strong>${fmt(monthlyPerMonth)}</strong> every month</div>
+        <div class="mrr-item">Active annual subscribers: <strong>${activeAnnualCount}</strong> &mdash; renewals distributed across months</div>
+      </div>
+      <div class="revenue-callouts">
+        <div class="callout high">Highest: <strong>${highMonth.label}</strong> at <strong>${fmt(highMonth.amount)}</strong></div>
+        <div class="callout low">Lowest: <strong>${lowMonth.label}</strong> at <strong>${fmt(lowMonth.amount)}</strong></div>
+      </div>
+      <div class="bar-chart">${barsHtml}</div>
+    </div>`;
+}
+
+/* ── Main Load ── */
+async function loadData() {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  document.getElementById('content').innerHTML = '<div class="loading">Loading subscriptions...</div>';
+  document.getElementById('revenue-container').innerHTML = '';
+  paymentSortState = 0;
+
+  try {
+    const res = await fetch('/api/subscriptions');
+    const data = await res.json();
+
+    if (data.error) { showError(data); return; }
+
+    const subs = data.subscriptions || [];
+    const rates = data.rates || cachedRates;
+    if (rates) cachedRates = rates;
+
+    defaultSort(subs);
+    currentSubs = subs;
+
+    // Debug: log first 3 raw subscription objects to inspect date fields
+    console.log("Sample subscription data:", subs.slice(0, 3));
+
+    // Summary counts
+    const pendingCount = subs.filter(s => s.status === 'pending-cancel').length;
+    const stripeCount = subs.filter(s => normalizePayment(s.payment_method, s.payment_method_title).type === 'stripe').length;
+    const paypalCount = subs.filter(s => normalizePayment(s.payment_method, s.payment_method_title).type === 'paypal').length;
+    const annualCount = subs.filter(s => (s.billing_period || '').toLowerCase() === 'year').length;
+    const monthlyCount = subs.filter(s => (s.billing_period || '').toLowerCase() === 'month').length;
+
+    document.getElementById('s-total').textContent = subs.length;
+    document.getElementById('s-pending').textContent = pendingCount;
+    document.getElementById('s-stripe').textContent = stripeCount;
+    document.getElementById('s-paypal').textContent = paypalCount;
+    document.getElementById('s-annual').textContent = annualCount;
+    document.getElementById('s-monthly').textContent = monthlyCount;
+
+    // Timestamp
+    const ts = new Date().toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, month: 'short', day: 'numeric' });
+    document.getElementById('last-updated').textContent = 'Last updated: ' + ts;
+
+    renderTable(subs);
+    renderRevenue(subs);
+  } catch (err) {
+    document.getElementById('content').innerHTML = `
+      <div class="error-box">
+        <h3>Connection Error</h3>
+        <p>${err.message}</p>
+      </div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh';
+  }
+}
+
+loadData();
+</script>
+</body>
+</html>

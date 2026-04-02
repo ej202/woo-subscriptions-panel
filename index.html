@@ -196,6 +196,7 @@
   </div>
 
   <div id="revenue-container"></div>
+  <div id="debug-container" style="margin-top:24px"></div>
 </div>
 
 <script>
@@ -242,41 +243,50 @@ function statusBadge(status) {
   return '<span class="badge badge-active">Active</span>';
 }
 
-/* ── Next Payment date extraction ── */
-function isValidDateStr(raw) {
-  if (!raw || raw === '' || raw === '0000-00-00 00:00:00') return false;
-  const dt = new Date(raw);
-  return !isNaN(dt.getTime()) && dt.getFullYear() >= 2000;
-}
-
-function extractNextPaymentDate(sub) {
-  // Check all known field name variants in priority order
+/* ── Next Payment date extraction (exhaustive) ── */
+function getNextPaymentDate(sub) {
+  // WooCommerce Subscriptions REST API returns dates in various locations
+  // depending on plugin version. Check each one in order.
   const candidates = [
-    sub.schedule_next_payment,
-    sub.next_payment_date,
-    sub.next_payment
+    sub.schedule_next_payment,           // Most common in WC Subscriptions 3.x+
+    sub.next_payment_date,               // Some versions
+    sub.next_payment,                    // Some versions
+    sub.schedule?.next_payment,          // Nested schedule object
+    sub.dates?.next_payment,             // Dates object variant
+    sub.payment_dates?.next_payment,     // Payment dates variant
   ];
-  for (const raw of candidates) {
-    if (isValidDateStr(raw)) return raw;
-  }
-  // Check meta_data array for _schedule_next_payment
+
+  // Also check meta_data array for all known keys
   if (Array.isArray(sub.meta_data)) {
-    for (const meta of sub.meta_data) {
-      if (meta.key === '_schedule_next_payment' && isValidDateStr(meta.value)) {
-        return meta.value;
-      }
+    const metaKeys = [
+      '_schedule_next_payment',
+      'schedule_next_payment',
+      '_next_payment_date'
+    ];
+    for (const key of metaKeys) {
+      const meta = sub.meta_data.find(m => m.key === key);
+      if (meta?.value) candidates.push(meta.value);
     }
+  }
+
+  for (const val of candidates) {
+    if (!val) continue;
+    if (val === '0000-00-00 00:00:00') continue;
+    if (val === '') continue;
+    const d = new Date(val);
+    if (!isNaN(d.getTime()) && d.getFullYear() >= 2000) return d;
   }
   return null;
 }
 
 function nextPaymentHtml(sub) {
   if (sub.status === 'pending-cancel') return '<span class="next-cancelled">Cancelled</span>';
-  const raw = extractNextPaymentDate(sub);
-  if (!raw) return '<span class="next-check">Check manually</span>';
-  const formatted = fmtDate(raw);
-  if (!formatted) return '<span class="next-check">Check manually</span>';
-  return formatted;
+  const nextDate = getNextPaymentDate(sub);
+  if (nextDate) {
+    return nextDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+  console.warn('Could not find next payment date for sub ID:', sub.id, sub);
+  return '<span class="next-check">Check manually</span>';
 }
 
 /* ── Sorting ── */
@@ -405,8 +415,7 @@ function parseDate(raw) {
 
 function estimateNextRenewal(sub) {
   // Try all known date field variants via shared extractor
-  const raw = extractNextPaymentDate(sub);
-  const npd = raw ? parseDate(raw) : null;
+  const npd = getNextPaymentDate(sub);
   if (npd) return npd;
 
   // Fallback: calculate from start_date + billing_period
@@ -605,6 +614,19 @@ async function loadData() {
 
     renderTable(subs);
     renderRevenue(subs);
+
+    // Debug panel: show raw API data for first subscription
+    if (subs.length > 0) {
+      const raw = JSON.stringify(subs[0], null, 2)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      document.getElementById('debug-container').innerHTML = `
+        <details style="background:#fff;border-radius:10px;padding:16px 24px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-top:4px">
+          <summary style="cursor:pointer;font-size:.85rem;font-weight:600;color:#636e72">
+            \uD83D\uDD0D Debug: Raw API data for first subscription (ID #${subs[0].id})
+          </summary>
+          <pre style="margin-top:12px;font-size:.72rem;color:#2d3436;overflow:auto;max-height:500px;background:#f4f6f9;padding:16px;border-radius:6px">${raw}</pre>
+        </details>`;
+    }
   } catch (err) {
     document.getElementById('content').innerHTML = `
       <div class="error-box">

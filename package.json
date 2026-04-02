@@ -1,0 +1,9 @@
+{
+  "name": "wc-subscriptions-dashboard",
+  "version": "1.0.0",
+  "description": "WooCommerce Subscriptions Dashboard — local proxy + frontend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

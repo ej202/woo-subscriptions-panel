@@ -591,8 +591,14 @@ async function loadData() {
     defaultSort(subs);
     currentSubs = subs;
 
-    // Debug: log first 3 raw subscription objects to inspect date fields
+    // Debug: log raw subscription data to verify correct endpoint
     console.log("Sample subscription data:", subs.slice(0, 3));
+    if (subs.length > 0) {
+      console.log("First subscription object keys:", Object.keys(subs[0]));
+      console.log("parent_id value:", subs[0].parent_id);
+      console.log("schedule_next_payment:", subs[0].schedule_next_payment);
+      console.log("billing_period:", subs[0].billing_period);
+    }
 
     // Summary counts
     const pendingCount = subs.filter(s => s.status === 'pending-cancel').length;

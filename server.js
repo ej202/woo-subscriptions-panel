@@ -22,19 +22,35 @@ if (!WC_URL || !WC_KEY || !WC_SECRET) {
   process.exit(1);
 }
 
-function httpsGet(url) {
+function httpsGet(url, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'WC-Dashboard/1.0' } }, res => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(data) });
-        } catch {
-          resolve({ status: res.statusCode, headers: res.headers, body: data });
+    function doRequest(reqUrl, redirectsLeft) {
+      const mod = reqUrl.startsWith('https') ? https : require('http');
+      mod.get(reqUrl, { headers: { 'User-Agent': 'WC-Dashboard/1.0' } }, res => {
+        // Follow redirects (301, 302, 307, 308)
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+          if (redirectsLeft <= 0) {
+            resolve({ status: res.statusCode, headers: res.headers, body: 'Too many redirects' });
+            return;
+          }
+          const redirectUrl = new URL(res.headers.location, reqUrl).href;
+          console.log(`  ↳ Redirect ${res.statusCode} → ${redirectUrl}`);
+          res.resume(); // drain the response
+          doRequest(redirectUrl, redirectsLeft - 1);
+          return;
         }
-      });
-    }).on('error', reject);
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(data) });
+          } catch {
+            resolve({ status: res.statusCode, headers: res.headers, body: data });
+          }
+        });
+      }).on('error', reject);
+    }
+    doRequest(url, maxRedirects);
   });
 }
 
@@ -56,6 +72,12 @@ async function fetchAllSubscriptions(status) {
     }
 
     const items = res.body;
+    // Debug: log first fetch to confirm correct endpoint response
+    if (page === 1 && items && Array.isArray(items) && items.length > 0) {
+      const first = items[0];
+      console.log(`[${status}] First object keys:`, Object.keys(first).join(', '));
+      console.log(`[${status}] parent_id=${first.parent_id}, schedule_next_payment=${first.schedule_next_payment}, billing_period=${first.billing_period}, status=${first.status}`);
+    }
     if (!Array.isArray(items)) {
       return { error: 'unexpected_response', message: 'Expected array from API', detail: items };
     }

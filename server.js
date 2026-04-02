@@ -94,6 +94,83 @@ async function fetchExchangeRates() {
   }
 }
 
+async function fetchAllOrders(afterDate) {
+  const all = [];
+  let page = 1;
+  while (true) {
+    const url = `${WC_URL}/wp-json/wc/v3/orders?status=completed,processing&after=${afterDate}&per_page=100&page=${page}&orderby=date&order=asc&consumer_key=${WC_KEY}&consumer_secret=${WC_SECRET}`;
+    const res = await httpsGet(url);
+
+    if (res.status !== 200) {
+      return { error: 'api_error', status: res.status, message: `Orders API returned status ${res.status}`, detail: res.body };
+    }
+
+    const items = res.body;
+    if (!Array.isArray(items)) {
+      return { error: 'unexpected_response', message: 'Expected array from orders API', detail: items };
+    }
+
+    all.push(...items);
+
+    const totalPages = parseInt(res.headers['x-wp-totalpages'] || '1', 10);
+    if (page >= totalPages) break;
+    page++;
+  }
+  return all;
+}
+
+async function handleCollectedRevenue(req, res) {
+  try {
+    const [orders, rates] = await Promise.all([
+      fetchAllOrders('2025-12-31T23:59:59'),
+      fetchExchangeRates()
+    ]);
+
+    if (orders.error) {
+      res.writeHead(orders.status || 500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(orders));
+      return;
+    }
+
+    // Group by month using date_paid_gmt or date_created_gmt
+    const monthBuckets = {};
+
+    for (const order of orders) {
+      const dateStr = order.date_paid_gmt || order.date_created_gmt;
+      if (!dateStr) continue;
+
+      const d = new Date(dateStr + (dateStr.includes('Z') ? '' : 'Z'));
+      if (isNaN(d.getTime())) continue;
+
+      const monthKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+
+      if (!monthBuckets[monthKey]) {
+        const label = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+        monthBuckets[monthKey] = { month: monthKey, label, total_usd: 0, order_count: 0 };
+      }
+
+      // Convert to USD
+      let usd = parseFloat(order.total) || 0;
+      const currency = order.currency || 'USD';
+      if (currency !== 'USD' && rates && rates[currency]) {
+        usd = usd / rates[currency];
+      }
+
+      monthBuckets[monthKey].total_usd += usd;
+      monthBuckets[monthKey].order_count++;
+    }
+
+    // Sort by month key and return as array
+    const result = Object.values(monthBuckets).sort((a, b) => a.month.localeCompare(b.month));
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'server_error', message: err.message }));
+  }
+}
+
 async function handleSubscriptions(req, res) {
   try {
     const [active, pendingCancel, rates] = await Promise.all([
@@ -129,6 +206,11 @@ const server = http.createServer((req, res) => {
 
   if (parsed.pathname === '/api/subscriptions' && req.method === 'GET') {
     handleSubscriptions(req, res);
+    return;
+  }
+
+  if (parsed.pathname === '/api/collected-revenue' && req.method === 'GET') {
+    handleCollectedRevenue(req, res);
     return;
   }
 

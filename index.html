@@ -168,6 +168,48 @@
   .callout.high { border-left-color: #00b894; }
   .callout.low { border-left-color: #e17055; }
 
+  /* ── Collected Revenue ── */
+  .collected-section {
+    background: #fff; border-radius: 10px; padding: 28px 32px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.08); margin-bottom: 28px;
+  }
+  .collected-section h2 {
+    font-size: 20px; font-weight: 700; margin-bottom: 18px; color: #1b2a4a;
+  }
+  .collected-stats {
+    display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px;
+    padding-bottom: 18px; border-bottom: 1px solid #edf2f7;
+  }
+  .collected-stat {
+    background: #f0fdf4; border-radius: 8px; padding: 14px 20px;
+    border-left: 3px solid #00b894; flex: 1; min-width: 160px;
+  }
+  .collected-stat .cs-label {
+    font-size: .65rem; color: #636e72; text-transform: uppercase;
+    letter-spacing: .6px; font-weight: 600; margin-bottom: 4px;
+  }
+  .collected-stat .cs-value {
+    font-size: 1.3rem; font-weight: 800; color: #1b2a4a;
+  }
+  .collected-stat .cs-sub {
+    font-size: .7rem; color: #a0aec0; margin-top: 2px;
+  }
+  .bar-fill-green {
+    height: 100%; background: linear-gradient(90deg, #00b894, #55efc4);
+    border-radius: 4px; display: flex; align-items: center;
+    padding-left: 10px; min-width: 48px; transition: width .4s ease;
+  }
+  .bar-fill-green.partial {
+    background: linear-gradient(90deg, #81ecec, #b2f5ea);
+  }
+  .bar-fill-green.partial .bar-amount { color: #636e72; }
+  .bar-meta {
+    font-size: .7rem; color: #a0aec0; margin-left: 6px; white-space: nowrap;
+  }
+  .collected-loading {
+    text-align: center; padding: 32px; color: #a0aec0; font-size: .88rem;
+  }
+
   /* ── Error / Loading ── */
   .error-box {
     background: #fff8e1; border-left: 4px solid #fdcb6e; padding: 20px 24px;
@@ -215,6 +257,7 @@
     <div class="loading">Loading subscriptions...</div>
   </div>
 
+  <div id="collected-container"></div>
   <div id="revenue-container"></div>
 </div>
 
@@ -643,6 +686,86 @@ function renderRevenue(subs) {
     </div>`;
 }
 
+/* ── Collected Revenue ── */
+async function loadCollectedRevenue() {
+  const container = document.getElementById('collected-container');
+  container.innerHTML = '<div class="collected-loading">Fetching revenue data...</div>';
+
+  try {
+    const res = await fetch('/api/collected-revenue');
+    const data = await res.json();
+
+    if (data.error) {
+      container.innerHTML = `<div class="error-box"><h3>Revenue data error: ${data.message || 'Unknown'}</h3></div>`;
+      return;
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      container.innerHTML = '<div class="collected-section"><h2>Revenue Collected (2026)</h2><p style="color:#a0aec0">No order data found from 2026 onward.</p></div>';
+      return;
+    }
+
+    renderCollectedRevenue(data);
+  } catch (err) {
+    document.getElementById('collected-container').innerHTML = `<div class="error-box"><h3>Failed to load revenue data</h3><p>${err.message}</p></div>`;
+  }
+}
+
+function renderCollectedRevenue(months) {
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  const grandTotal = months.reduce((s, m) => s + m.total_usd, 0);
+  const bestMonth = months.reduce((best, m) => m.total_usd > best.total_usd ? m : best, months[0]);
+  const currentMonth = months.find(m => m.month === currentMonthKey);
+  const avgRevenue = grandTotal / months.length;
+  const maxAmount = Math.max(...months.map(m => m.total_usd), 1);
+
+  let barsHtml = '';
+  for (const m of months) {
+    const isCurrent = m.month === currentMonthKey;
+    const pct = Math.max((m.total_usd / maxAmount) * 100, 4);
+    barsHtml += `
+      <div class="bar-row">
+        <div class="bar-label">${m.label}</div>
+        <div class="bar-track">
+          <div class="bar-fill-green${isCurrent ? ' partial' : ''}" style="width:${pct.toFixed(1)}%">
+            <span class="bar-amount">${fmt(m.total_usd)}</span>
+          </div>
+        </div>
+        <span class="bar-meta">(${m.order_count} payment${m.order_count !== 1 ? 's' : ''})${isCurrent ? ' \u2022 in progress' : ''}</span>
+      </div>`;
+  }
+
+  document.getElementById('collected-container').innerHTML = `
+    <div class="collected-section">
+      <h2>Revenue Collected (2026)</h2>
+      <div class="collected-stats">
+        <div class="collected-stat">
+          <div class="cs-label">Total Collected</div>
+          <div class="cs-value">${fmt(grandTotal)}</div>
+          <div class="cs-sub">Jan 2026 \u2013 present</div>
+        </div>
+        <div class="collected-stat">
+          <div class="cs-label">Best Month</div>
+          <div class="cs-value">${fmt(bestMonth.total_usd)}</div>
+          <div class="cs-sub">${bestMonth.label}</div>
+        </div>
+        <div class="collected-stat">
+          <div class="cs-label">Current Month</div>
+          <div class="cs-value">${currentMonth ? fmt(currentMonth.total_usd) : '$0.00'}</div>
+          <div class="cs-sub">month in progress</div>
+        </div>
+        <div class="collected-stat">
+          <div class="cs-label">Monthly Average</div>
+          <div class="cs-value">${fmt(avgRevenue)}</div>
+          <div class="cs-sub">across ${months.length} month${months.length !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+      <div class="bar-chart">${barsHtml}</div>
+    </div>`;
+}
+
 /* ── Main Load ── */
 async function loadData() {
   const btn = document.getElementById('refresh-btn');
@@ -655,6 +778,9 @@ async function loadData() {
   sortDir = 0;
   activeFilters.clear();
   updateFilterCardStyles();
+
+  // Load collected revenue in parallel (doesn't block main table)
+  loadCollectedRevenue();
 
   try {
     const res = await fetch('/api/subscriptions');
